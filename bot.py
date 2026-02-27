@@ -46,87 +46,86 @@ async def process_file(
     target_bin: str = None
 ) -> tuple[list[str], int, int]:
     results = []
-    rejected_samples = []  # debug help
-    
+    reject_counts = {"bad_length": 0, "bad_digits": 0, "bad_cvv": 0, "old": 0, "no_bin_match": 0}
+    sample_rejects = []
+
     text = file_path.read_text(encoding="utf-8", errors="replace")
-    
-    # Quick preview
-    preview = text[:1200].replace("`", "'").strip()
-    await update.message.reply_text(
-        f"Preview (first \~1200 chars):\n\n{preview}\n\nTotal chars: {len(text)}"
-    )
-    
-    # Strict 16-digit card pattern
-    pattern = re.compile(
-        r'\b(\d{16})\s*[\|\|]\s*(\d{1,2})\s*[\|\|]\s*(\d{2,4})\s*[\|\|]\s*(\d{3,4})\b',
-        re.IGNORECASE
-    )
-    
+
+    # Preview (shortened to avoid huge messages)
+    preview = text[:800].replace("`", "'").strip()
+    await update.message.reply_text(f"Preview snippet:\n{preview}\n\nTotal chars: {len(text)}")
+
+    # Very strict 16-digit only pattern
+    pattern = re.compile(r'(\d{16})\s*[|]\s*(\d{1,2})\s*[|]\s*(\d{2,4})\s*[|]\s*(\d{3,4})', re.I)
     matches = pattern.findall(text)
-    
-    await update.message.reply_text(f"Found {len(matches)} potential 16-digit pipe matches")
-    
-    processed = 0  # valid ones
+
     total_potential = len(matches)
-    
+    await update.message.reply_text(f"Found {total_potential} potential 16-digit | matches")
+
+    if total_potential == 0:
+        await update.message.reply_text("No matches at all → file does not contain 16-digit|mm|yy|cvv patterns")
+        return [], 0, 0
+
     current_yy = datetime.now().year % 100
-    
-    for card, mm, yy, cvv in matches:
-        card = card.strip()
-        # Enforce exactly 16 digits - no more, no less
-        if len(card) != 16 or not card.isdigit():
-            if len(rejected_samples) < 3:
-                rejected_samples.append(f"Rejected (not 16 digits): {card}|{mm}|{yy}|{cvv}")
+    processed = 0
+
+    for i, (card, mm, yy, cvv) in enumerate(matches, 1):
+        # Fast skip if not exactly 16
+        if len(card) != 16:
+            reject_counts["bad_length"] += 1
             continue
-        
+
+        if not card.isdigit():
+            reject_counts["bad_digits"] += 1
+            if len(sample_rejects) < 3:
+                sample_rejects.append(card)
+            continue
+
         mm_clean = mm.zfill(2)
-        
-        # Year: always last 2 digits
+
         yy_clean = yy[-2:].zfill(2)
-        
+        yy_int = int(yy_clean)
+
         cvv_clean = cvv.strip()
         if not cvv_clean.isdigit() or len(cvv_clean) not in (3, 4):
-            if len(rejected_samples) < 3:
-                rejected_samples.append(f"Rejected (bad CVV): {card}|{mm}|{yy}|{cvv}")
+            reject_counts["bad_cvv"] += 1
             continue
-        
-        # Optional: skip obviously expired (comment out if you want all)
-        yy_int = int(yy_clean)
+
+        # Skip very old if you want (comment out if unwanted)
         if yy_int < current_yy - 6:
-            if len(rejected_samples) < 3:
-                rejected_samples.append(f"Rejected (old expiry): {card}|{mm}|{yy}|{cvv}")
+            reject_counts["old"] += 1
             continue
-        
+
         if target_bin and not card.startswith(target_bin):
+            reject_counts["no_bin_match"] += 1
             continue
-        
+
         results.append(f"{card}|{mm_clean}|{yy_clean}|{cvv_clean}\n")
         processed += 1
-        
-        # Progress every 300 valid or at end
-        if processed % 300 == 0 or processed == total_potential:
-            pct = round((processed / total_potential) * 100, 1) if total_potential > 0 else 0
+
+        # Progress only every 1000 items - prevents spam & rate limits
+        if i % 1000 == 0 or i == total_potential:
+            valid_pct = round(processed / total_potential * 100, 1) if total_potential > 0 else 0
             await update.message.reply_text(
-                f"Valid 16-digit cards: {processed}/{total_potential} ({pct}%)\n"
-                f"After BIN filter: {len(results)}"
+                f"Scanned {i}/{total_potential} candidates\n"
+                f"Valid so far: {processed} ({valid_pct}%)\n"
+                f"Kept after BIN filter: {len(results)}"
             )
-            await asyncio.sleep(0.1)
-    
-    # Show why many were dropped if ratio bad
-    if processed < total_potential * 0.2 and rejected_samples:  # less than 20% valid
-        await update.message.reply_text(
-            "Low valid count — sample rejected lines:\n\n" +
-            "\n".join(rejected_samples[:5]) +
-            f"\n\n(and {len(rejected_samples)} more similar...)"
-        )
-    
+
+    # Final summary
+    summary = f"Final stats:\nValid extracted: {processed}\nTotal candidates: {total_potential}\n\nRejections:\n"
+    for k, v in reject_counts.items():
+        if v > 0:
+            summary += f"  {k}: {v}\n"
+
+    if sample_rejects:
+        summary += f"\nSample bad card numbers: {', '.join(sample_rejects[:3])} ..."
+
+    await update.message.reply_text(summary)
+
     if not results:
-        await update.message.reply_text(
-            "No **16-digit** cards passed validation.\n"
-            "→ See rejected samples above.\n"
-            "→ If preview shows valid 16-digit lines but nothing extracted → paste 5-10 example lines here."
-        )
-    
+        await update.message.reply_text("Zero cards kept after validation.\nMost likely cause: CVV not 3-4 digits, or year parsing failed, or all rejected by BIN filter.")
+
     return results, processed, len(text.splitlines())
 
 
