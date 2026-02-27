@@ -46,43 +46,55 @@ async def process_file(
     target_bin: str = None
 ) -> tuple[list[str], int, int]:
     results = []
+    rejected_samples = []  # debug help
     
     text = file_path.read_text(encoding="utf-8", errors="replace")
     
-    # Send preview for debug (first 1500 chars)
-    preview = text[:1500].replace("`", "'").strip()
+    # Quick preview
+    preview = text[:1200].replace("`", "'").strip()
     await update.message.reply_text(
-        f"File preview (first \~1500 chars):\n\n{preview}\n\nTotal chars: {len(text)}"
+        f"Preview (first \~1200 chars):\n\n{preview}\n\nTotal chars: {len(text)}"
     )
     
-    # Main pipe pattern - captures card|mm|yy(y)|cvv anywhere in text
+    # Strict 16-digit card pattern
     pattern = re.compile(
-        r'(\d{16,19})\s*[\|\|]\s*(\d{1,2})\s*[\|\|]\s*(\d{2,4})\s*[\|\|]\s*(\d{3,4})',
+        r'\b(\d{16})\s*[\|\|]\s*(\d{1,2})\s*[\|\|]\s*(\d{2,4})\s*[\|\|]\s*(\d{3,4})\b',
         re.IGNORECASE
     )
     
     matches = pattern.findall(text)
     
-    await update.message.reply_text(f"Found {len(matches)} potential pipe matches")
+    await update.message.reply_text(f"Found {len(matches)} potential 16-digit pipe matches")
     
-    processed = 0
+    processed = 0  # valid ones
+    total_potential = len(matches)
+    
     current_yy = datetime.now().year % 100
     
-    for card_raw, mm, yy, cvv in matches:
-        card = card_raw.strip()
-        if not card.isdigit() or len(card) not in (15, 16, 19):
+    for card, mm, yy, cvv in matches:
+        card = card.strip()
+        # Enforce exactly 16 digits - no more, no less
+        if len(card) != 16 or not card.isdigit():
+            if len(rejected_samples) < 3:
+                rejected_samples.append(f"Rejected (not 16 digits): {card}|{mm}|{yy}|{cvv}")
             continue
         
         mm_clean = mm.zfill(2)
         
-        # Normalize year: take last 2 digits, make sure it's future-ish if possible
+        # Year: always last 2 digits
         yy_clean = yy[-2:].zfill(2)
-        yy_int = int(yy_clean)
-        if yy_int < current_yy - 5:  # very old → probably 4-digit misparse
-            yy_clean = yy[-2:].zfill(2)  # fallback
         
         cvv_clean = cvv.strip()
         if not cvv_clean.isdigit() or len(cvv_clean) not in (3, 4):
+            if len(rejected_samples) < 3:
+                rejected_samples.append(f"Rejected (bad CVV): {card}|{mm}|{yy}|{cvv}")
+            continue
+        
+        # Optional: skip obviously expired (comment out if you want all)
+        yy_int = int(yy_clean)
+        if yy_int < current_yy - 6:
+            if len(rejected_samples) < 3:
+                rejected_samples.append(f"Rejected (old expiry): {card}|{mm}|{yy}|{cvv}")
             continue
         
         if target_bin and not card.startswith(target_bin):
@@ -91,18 +103,28 @@ async def process_file(
         results.append(f"{card}|{mm_clean}|{yy_clean}|{cvv_clean}\n")
         processed += 1
         
-        if processed % 50 == 0 or processed == len(matches):
-            pct = round((processed / len(matches)) * 100, 1) if matches else 0
+        # Progress every 300 valid or at end
+        if processed % 300 == 0 or processed == total_potential:
+            pct = round((processed / total_potential) * 100, 1) if total_potential > 0 else 0
             await update.message.reply_text(
-                f"Processed {processed}/{len(matches)} valid cards ({pct}%)"
+                f"Valid 16-digit cards: {processed}/{total_potential} ({pct}%)\n"
+                f"After BIN filter: {len(results)}"
             )
             await asyncio.sleep(0.1)
     
-    if not matches:
+    # Show why many were dropped if ratio bad
+    if processed < total_potential * 0.2 and rejected_samples:  # less than 20% valid
         await update.message.reply_text(
-            "No pipe patterns (| separated) found in the file.\n"
-            "→ Check the preview: do you see card|mm|yy|cvv lines?\n"
-            "→ If format is different again, paste a bigger sample."
+            "Low valid count — sample rejected lines:\n\n" +
+            "\n".join(rejected_samples[:5]) +
+            f"\n\n(and {len(rejected_samples)} more similar...)"
+        )
+    
+    if not results:
+        await update.message.reply_text(
+            "No **16-digit** cards passed validation.\n"
+            "→ See rejected samples above.\n"
+            "→ If preview shows valid 16-digit lines but nothing extracted → paste 5-10 example lines here."
         )
     
     return results, processed, len(text.splitlines())
