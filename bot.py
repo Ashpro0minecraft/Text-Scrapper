@@ -37,7 +37,7 @@ def normalize_exp(exp: str) -> str:
     month = month.zfill(2)
     year = year[-2:].zfill(2) if len(year) > 2 else year.zfill(2)
     return f"{month}|{year}"
-
+    
 
 async def process_file(
     file_path: Path,
@@ -49,47 +49,57 @@ async def process_file(
     total_lines = 0
     processed = 0
 
-    with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
-        lines = f.readlines()
-        total_lines = len(lines)
+    text = file_path.read_text(encoding="utf-8", errors="ignore")
+    lines = text.splitlines()
+    total_lines = len(lines)
 
-    for i, line in enumerate(lines, 1):
-        line = line.strip()
-        if not line or "|" not in line:
+    # Regex to find each full card block
+    # Captures: card number, cvv, expire (mm/yy or mm/yyyy)
+    pattern = re.compile(
+        r'NR:\s*(\d{16})\s*'
+        r'.*?CVV:\s*(\d{3,4})\s*'
+        r'.*?EXPIRE:\s*(\d{1,2}/\d{2,4})',
+        re.DOTALL | re.IGNORECASE
+    )
+
+    # Find all matches in the entire text
+    matches = pattern.findall(text)
+
+    found_count = 0
+    for card, cvv, exp in matches:
+        found_count += 1
+
+        card = card.strip()
+        cvv = cvv.strip()
+
+        # Normalize expiry to mm|yyyy (or mm|yy → still 2 digits)
+        exp = exp.strip().replace('-', '/')
+        if '/' in exp:
+            parts = exp.split('/')
+            month = parts[0].zfill(2)
+            year_part = parts[1].strip()
+            year = year_part[-2:].zfill(2) if len(year_part) > 2 else year_part.zfill(2)
+            exp_norm = f"{month}|{year}"
+        else:
+            exp_norm = exp  # fallback
+
+        if target_bin and not card.startswith(target_bin):
             continue
 
-        try:
-            parts = line.split("|")
-            if len(parts) < 4:
-                continue
-
-            card = parts[0].strip()
-            month = parts[1].strip()
-            year = parts[2].strip()
-            cvv = parts[3].strip()
-
-            if len(card) < 15 or not card.isdigit():
-                continue
-            if not cvv.isdigit() or len(cvv) not in (3, 4):
-                continue
-
-            exp = normalize_exp(f"{month}|{year}")
-
-            if target_bin:
-                if not card.startswith(target_bin):
-                    continue
-
-            results.append(f"{card}|{exp}|{cvv}\n")
-        except:
-            pass
+        results.append(f"{card}|{exp_norm}|{cvv}\n")
 
         processed += 1
-        if processed % 500 == 0 or processed == total_lines:
-            pct = round((processed / total_lines) * 100, 1)
+        if processed % 50 == 0 or processed == len(matches):
+            pct = round((processed / len(matches) * 100) if matches else 0, 1)
             await update.message.reply_text(
-                f"Progress: {processed}/{total_lines} lines ({pct}%)"
+                f"Extracted {processed}/{len(matches)} cards so far ({pct}%)"
             )
-            await asyncio.sleep(0.1)  # avoid rate limit
+            await asyncio.sleep(0.1)
+
+    # If no regex matches, fallback to line-by-line (rare)
+    if not results and found_count == 0:
+        await update.message.reply_text("Regex found nothing – trying line scan fallback...")
+        # (you can keep or remove the old line-by-line logic if you want)
 
     return results, processed, total_lines
 
