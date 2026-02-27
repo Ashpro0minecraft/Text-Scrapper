@@ -129,6 +129,43 @@ async def send_result_file(
 
 
 # ────────────────────────────────────────────────
+# New dedicated /bin handler
+# ────────────────────────────────────────────────
+async def bin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args or len(context.args) != 1 or not context.args[0].isdigit() or len(context.args[0]) != 6:
+        await update.message.reply_text("Usage: /bin 400022   (reply to a .txt file)")
+        return
+
+    if not update.message.reply_to_message or not update.message.reply_to_message.document:
+        await update.message.reply_text("You must reply to a .txt file message with /bin XXXXXX")
+        return
+
+    target_bin = context.args[0]
+    mode = f"bin_{target_bin}"
+
+    doc = update.message.reply_to_message.document
+    file = await doc.get_file()
+    
+    temp_path = TEMP_DIR / f"{doc.file_id}_{doc.file_name}"
+    
+    await update.message.reply_text(f"Downloading file for BIN {target_bin} scan...")
+    await file.download_to_drive(custom_path=temp_path)
+
+    if temp_path.stat().st_size == 0:
+        await update.message.reply_text("Downloaded file is empty — upload failed.")
+        temp_path.unlink(missing_ok=True)
+        return
+
+    await update.message.reply_text("Starting BIN-specific extraction...")
+
+    results, processed, total = await process_file(temp_path, update, context, target_bin=target_bin)
+
+    await send_result_file(update, results, doc.file_name, mode)
+
+    temp_path.unlink(missing_ok=True)
+
+
+# ────────────────────────────────────────────────
 # Handlers
 # ────────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -156,36 +193,14 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def scrap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.reply_to_message or not update.message.reply_to_message.document:
-        await update.message.reply_text("Reply to a .txt file message with this command.")
+        await update.message.reply_text("Reply to a .txt file message with /scrap")
         return
 
+    # No BIN filtering here
     target_bin = None
     mode = "full"
 
-    # Check if /bin XXXXXX
-    if context.args:
-        if len(context.args) == 1 and context.args[0].isdigit() and len(context.args[0]) == 6:
-            target_bin = context.args[0]
-            mode = f"bin_{target_bin}"
-        else:
-            await update.message.reply_text("Usage for BIN filter: /bin 400022")
-            return
-
-    doc = update.message.reply_to_message.document
-    file = await doc.get_file()
-    
-    temp_path = TEMP_DIR / f"{doc.file_id}_{doc.file_name}"
-    
-    await update.message.reply_text("Downloading file...")
-    await file.download_to_drive(custom_path=temp_path)
-
-    await update.message.reply_text("Starting extraction...")
-
-    results, processed, total = await process_file(temp_path, update, context, target_bin)
-
-    await send_result_file(update, results, doc.file_name, mode)
-
-    temp_path.unlink(missing_ok=True)
+    # ... rest of the function exactly the same (download, process_file with target_bin=None, send)
 
 
 # ────────────────────────────────────────────────
@@ -200,7 +215,8 @@ def main():
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.Document.TEXT, handle_document))
-    application.add_handler(CommandHandler("scrap", scrap_command))
+    application.add_handler(CommandHandler("scrap", scrap_command))   # keep full scrape
+    application.add_handler(CommandHandler("bin", bin_command))       # new dedicated BIN command
     # /bin is also handled in scrap_command when args present
 
     application.run_polling(allowed_updates=Update.ALL_TYPES)
