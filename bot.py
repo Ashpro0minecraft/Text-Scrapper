@@ -46,62 +46,66 @@ async def process_file(
     target_bin: str = None
 ) -> tuple[list[str], int, int]:
     results = []
-    total_lines = 0
-    processed = 0
-
-    text = file_path.read_text(encoding="utf-8", errors="ignore")
-    lines = text.splitlines()
-    total_lines = len(lines)
-
-    # Regex to find each full card block
-    # Captures: card number, cvv, expire (mm/yy or mm/yyyy)
-    pattern = re.compile(
-        r'NR:\s*(\d{16})\s*'
-        r'.*?CVV:\s*(\d{3,4})\s*'
-        r'.*?EXPIRE:\s*(\d{1,2}/\d{2,4})',
-        re.DOTALL | re.IGNORECASE
+    
+    text = file_path.read_text(encoding="utf-8", errors="replace")
+    
+    # Send preview for debug (first 1500 chars)
+    preview = text[:1500].replace("`", "'").strip()
+    await update.message.reply_text(
+        f"File preview (first \~1500 chars):\n\n{preview}\n\nTotal chars: {len(text)}"
     )
-
-    # Find all matches in the entire text
+    
+    # Main pipe pattern - captures card|mm|yy(y)|cvv anywhere in text
+    pattern = re.compile(
+        r'(\d{16,19})\s*[\|\|]\s*(\d{1,2})\s*[\|\|]\s*(\d{2,4})\s*[\|\|]\s*(\d{3,4})',
+        re.IGNORECASE
+    )
+    
     matches = pattern.findall(text)
-
-    found_count = 0
-    for card, cvv, exp in matches:
-        found_count += 1
-
-        card = card.strip()
-        cvv = cvv.strip()
-
-        # Normalize expiry to mm|yyyy (or mm|yy → still 2 digits)
-        exp = exp.strip().replace('-', '/')
-        if '/' in exp:
-            parts = exp.split('/')
-            month = parts[0].zfill(2)
-            year_part = parts[1].strip()
-            year = year_part[-2:].zfill(2) if len(year_part) > 2 else year_part.zfill(2)
-            exp_norm = f"{month}|{year}"
-        else:
-            exp_norm = exp  # fallback
-
+    
+    await update.message.reply_text(f"Found {len(matches)} potential pipe matches")
+    
+    processed = 0
+    current_yy = datetime.now().year % 100
+    
+    for card_raw, mm, yy, cvv in matches:
+        card = card_raw.strip()
+        if not card.isdigit() or len(card) not in (15, 16, 19):
+            continue
+        
+        mm_clean = mm.zfill(2)
+        
+        # Normalize year: take last 2 digits, make sure it's future-ish if possible
+        yy_clean = yy[-2:].zfill(2)
+        yy_int = int(yy_clean)
+        if yy_int < current_yy - 5:  # very old → probably 4-digit misparse
+            yy_clean = yy[-2:].zfill(2)  # fallback
+        
+        cvv_clean = cvv.strip()
+        if not cvv_clean.isdigit() or len(cvv_clean) not in (3, 4):
+            continue
+        
         if target_bin and not card.startswith(target_bin):
             continue
-
-        results.append(f"{card}|{exp_norm}|{cvv}\n")
-
+        
+        results.append(f"{card}|{mm_clean}|{yy_clean}|{cvv_clean}\n")
         processed += 1
+        
         if processed % 50 == 0 or processed == len(matches):
-            pct = round((processed / len(matches) * 100) if matches else 0, 1)
+            pct = round((processed / len(matches)) * 100, 1) if matches else 0
             await update.message.reply_text(
-                f"Extracted {processed}/{len(matches)} cards so far ({pct}%)"
+                f"Processed {processed}/{len(matches)} valid cards ({pct}%)"
             )
             await asyncio.sleep(0.1)
-
-    # If no regex matches, fallback to line-by-line (rare)
-    if not results and found_count == 0:
-        await update.message.reply_text("Regex found nothing – trying line scan fallback...")
-        # (you can keep or remove the old line-by-line logic if you want)
-
-    return results, processed, total_lines
+    
+    if not matches:
+        await update.message.reply_text(
+            "No pipe patterns (| separated) found in the file.\n"
+            "→ Check the preview: do you see card|mm|yy|cvv lines?\n"
+            "→ If format is different again, paste a bigger sample."
+        )
+    
+    return results, processed, len(text.splitlines())
 
 
 async def send_result_file(
