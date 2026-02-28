@@ -1,2 +1,1 @@
-python-telegram-bot>=21.0,<22.0   # pin to avoid breaking changes
-aiohttp
+python-telegram-bot>=21.0
