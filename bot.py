@@ -243,43 +243,48 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def main():
-    token = os.getenv("BOT_TOKEN")
-    
-    if not token or token.strip() == "":
-        logger.error("BOT_TOKEN environment variable is missing or empty!")
-        logger.error("Set it in Render/Railway variables tab and redeploy.")
-        return  # exit early
+# ... all your imports, functions, handlers stay above ...
 
-    logger.info(f"Starting bot with token: {token[:10]}... (hidden)")
+if __name__ == "__main__":
+    import asyncio
+    import logging
+
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+    logger = logging.getLogger(__name__)
+
+    token = os.getenv("BOT_TOKEN")
+
+    if not token:
+        logger.critical("BOT_TOKEN missing or empty → set it in environment variables")
+        exit(1)
+
+    logger.info(f"Token loaded (first 10 chars): {token[:10]}...")
 
     try:
         application = Application.builder().token(token).build()
 
-        # Add all your handlers here (keep what you have)
+        # Register ALL handlers here
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("scrap", scrap_command))
-        application.add_handler(CommandHandler("gen", ccgen_command))
-        application.add_handler(CommandHandler("bin", bininfo_command))
+        application.add_handler(CommandHandler("gen", gen_command))      # your new one
+        application.add_handler(CommandHandler("bin", bin_command))      # your new one
         application.add_handler(CommandHandler("chk", check_command))
-        # ... any MessageHandler you still use ...
 
-        logger.info("Bot handlers registered. Starting polling...")
+        # If you still have document handler
+        # application.add_handler(MessageHandler(filters.Document.TEXT, handle_document))
 
-        # Safe polling call
+        logger.info("All handlers added → starting polling")
+
         application.run_polling(
             allowed_updates=Update.ALL_TYPES,
-            drop_pending_updates=True,          # prevents flood on restart
-            poll_interval=0.5,                  # faster response
-            timeout=30                          # avoid long hangs
+            drop_pending_updates=True,
+            poll_interval=0.8,
+            timeout=25
         )
 
     except Exception as e:
-        logger.error(f"Critical error during startup/polling: {str(e)}", exc_info=True)
-        raise  # let platform see the crash
-
-if __name__ == "__main__":
-    main()
-
-if __name__ == "__main__":
-    main()
+        logger.exception("Startup / polling crashed")
+        raise
