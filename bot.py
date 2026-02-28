@@ -245,9 +245,13 @@ logger = logging.getLogger(__name__)
 
 # ... all your imports, functions, handlers stay above ...
 
+# ────────────────────────────────────────────────
+# MAIN - FIXED & CLEAN
+# ────────────────────────────────────────────────
 if __name__ == "__main__":
-    import asyncio
     import logging
+    from telegram.ext import Application
+    from datetime import datetime   # ← added (needed for process_file)
 
     logging.basicConfig(
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -256,28 +260,26 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
 
     token = os.getenv("BOT_TOKEN")
-
     if not token:
-        logger.critical("BOT_TOKEN missing or empty → set it in environment variables")
+        logger.critical("BOT_TOKEN is missing or empty! Set it in Railway variables.")
         exit(1)
 
-    logger.info(f"Token loaded (first 10 chars): {token[:10]}...")
+    logger.info(f"✅ Token loaded → Bot starting...")
 
     try:
         application = Application.builder().token(token).build()
 
-        # Register ALL handlers here
+        # ================== REGISTERED COMMANDS ==================
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("scrap", scrap_command))
-        application.add_handler(CommandHandler("gen", gen_command))      # your new one
-        application.add_handler(CommandHandler("bin", bin_command))      # your new one
-        application.add_handler(CommandHandler("chk", check_command))
+        
+        # ← NEW COMMANDS ARE COMMENTED UNTIL YOU ADD THEM
+        # application.add_handler(CommandHandler("gen", gen_command))
+        # application.add_handler(CommandHandler("bin", bin_command))
+        # application.add_handler(CommandHandler("chk", check_command))
 
-        # If you still have document handler
-        # application.add_handler(MessageHandler(filters.Document.TEXT, handle_document))
-
-        logger.info("All handlers added → starting polling")
-
+        logger.info("🚀 All handlers registered - Starting polling...")
+        
         application.run_polling(
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True,
@@ -286,5 +288,5 @@ if __name__ == "__main__":
         )
 
     except Exception as e:
-        logger.exception("Startup / polling crashed")
+        logger.exception("Bot crashed during startup")
         raise
