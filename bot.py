@@ -393,10 +393,12 @@ logger = logging.getLogger(__name__)
 # ────────────────────────────────────────────────
 # MAIN - FIXED & CLEAN
 # ────────────────────────────────────────────────
+# ────────────────────────────────────────────────
+# MAIN - FIXED & CLEAN (NO INDENTATION ERROR)
+# ────────────────────────────────────────────────
 if __name__ == "__main__":
     import logging
     from telegram.ext import Application
-    from datetime import datetime   # ← added (needed for process_file)
 
     logging.basicConfig(
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -418,9 +420,9 @@ if __name__ == "__main__":
         application.add_handler(CommandHandler("start", start))
         application.add_handler(CommandHandler("scrap", scrap_command))
         
-        # ← NEW COMMANDS ARE COMMENTED UNTIL YOU ADD THEM
-         application.add_handler(CommandHandler("gen", gen_command))
-         application.add_handler(CommandHandler("bin", bin_command))
+        # ← NEW COMMANDS ARE COMMENTED (we will add them next)
+        # application.add_handler(CommandHandler("gen", gen_command))
+        # application.add_handler(CommandHandler("bin", bin_command))
         # application.add_handler(CommandHandler("chk", check_command))
 
         logger.info("🚀 All handlers registered - Starting polling...")
