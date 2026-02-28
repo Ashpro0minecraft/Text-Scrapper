@@ -233,22 +233,53 @@ async def scrap_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ────────────────────────────────────────────────
 # Main
 # ────────────────────────────────────────────────
+import asyncio
+import logging
+from telegram.ext import Application
+
+logging.basicConfig(
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
 def main():
-    if not TOKEN:
-        logger.error("BOT_TOKEN environment variable not set!")
-        return
+    token = os.getenv("BOT_TOKEN")
+    
+    if not token or token.strip() == "":
+        logger.error("BOT_TOKEN environment variable is missing or empty!")
+        logger.error("Set it in Render/Railway variables tab and redeploy.")
+        return  # exit early
 
-    application = Application.builder().token(TOKEN).build()
+    logger.info(f"Starting bot with token: {token[:10]}... (hidden)")
 
-    application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("scrap", scrap_command))
-application.add_handler(CommandHandler("gen", ccgen_command))
-application.add_handler(CommandHandler("bin", bininfo_command))
-application.add_handler(CommandHandler("chk", check_command))
-application.add_handler(MessageHandler(filters.Document.TEXT, handle_document))  # optional feedback on upload
+    try:
+        application = Application.builder().token(token).build()
 
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+        # Add all your handlers here (keep what you have)
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("scrap", scrap_command))
+        application.add_handler(CommandHandler("gen", ccgen_command))
+        application.add_handler(CommandHandler("bin", bininfo_command))
+        application.add_handler(CommandHandler("chk", check_command))
+        # ... any MessageHandler you still use ...
 
+        logger.info("Bot handlers registered. Starting polling...")
+
+        # Safe polling call
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,          # prevents flood on restart
+            poll_interval=0.5,                  # faster response
+            timeout=30                          # avoid long hangs
+        )
+
+    except Exception as e:
+        logger.error(f"Critical error during startup/polling: {str(e)}", exc_info=True)
+        raise  # let platform see the crash
+
+if __name__ == "__main__":
+    main()
 
 if __name__ == "__main__":
     main()
