@@ -223,3 +223,61 @@ async def gen_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 BIN: {bin6}  {'(Amex 15-digit)' if len(cards[0].split('|')[0]) == 15 else '(16-digit)'}
 
 {bin_details}
+{"\n".join(cards)}
+Copy the block above (long press → Copy)"""
+    await update.message.reply_text(output, parse_mode="Markdown")
+
+async def bin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: /bin 625814  or  /bin 6258143602134128")
+        return
+
+    raw = context.args[0]
+    bin6 = ''.join(filter(str.isdigit, raw))[:6]
+
+    if len(bin6) != 6:
+        await update.message.reply_text("Need 6 digits")
+        return
+
+    await update.message.reply_text(f"Looking up {bin6}...")
+    info = await get_bin_info(bin6)
+    await update.message.reply_text(f"**BIN {bin6}**\n\n{info}")
+
+# ────────────────────────────────────────────────
+# MAIN
+# ────────────────────────────────────────────────
+if __name__ == "__main__":
+    logging.basicConfig(
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+    logger = logging.getLogger(__name__)
+
+    token = os.getenv("BOT_TOKEN")
+    if not token:
+        logger.critical("BOT_TOKEN missing!")
+        exit(1)
+
+    logger.info("Bot starting...")
+
+    try:
+        application = Application.builder().token(token).build()
+
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("scrap", scrap_command))
+        application.add_handler(CommandHandler("gen", gen_command))
+        application.add_handler(CommandHandler("bin", bin_command))
+
+        application.add_handler(MessageHandler(filters.Document.TEXT, handle_document))
+
+        logger.info("Starting polling...")
+        application.run_polling(
+            allowed_updates=Update.ALL_TYPES,
+            drop_pending_updates=True,
+            poll_interval=0.8,
+            timeout=25
+        )
+
+    except Exception as e:
+        logger.exception("Crash")
+        raise
